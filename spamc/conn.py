@@ -72,7 +72,7 @@ class Connector(object):
 
     def send(self, data):
         "send data"
-        return self._s.sendall(data.encode())
+        return self._s.sendall(data)
 
     # def recv(self, size=1024):
     #     "receive data"
