@@ -8,13 +8,17 @@ except ImportError:
         raise
     import unittest as unittest2
 
-from mimetools import Message
-from cStringIO import StringIO
+if sys.version_info < (3, 0):
+    from cStringIO import StringIO
+    from email.parser import Parser
+else:
+    from email.parser import Parser
+    from io import StringIO
 
 from spamc import SpamC
 from spamc.exceptions import SpamCError
 
-from _s import return_tcp
+from ._s import return_tcp
 
 
 class TestSpamCTCP(unittest2.TestCase):
@@ -100,8 +104,8 @@ class TestSpamCTCP(unittest2.TestCase):
             result = self.spamc_tcp.process(handle)
         self.assertIn('message', result)
         with open(self.filename) as headerhandle:
-            headers1 = Message(headerhandle)
-        headers2 = Message(StringIO(result['message']))
+            headers1 = Parser().parse(headerhandle)
+        headers2 = Parser().parse(StringIO(result['message']))
         self.assertEqual(
             headers1.get('Subject'),
             headers2.get('Subject')
@@ -112,7 +116,7 @@ class TestSpamCTCP(unittest2.TestCase):
             result = self.spamc_tcp.headers(handle)
         self.assertIn('message', result)
         with open(self.filename) as headerhandle:
-            headers = Message(headerhandle)
+            headers = Parser().parse(headerhandle)
         org_subject = "Subject: %s" % headers.get('Subject')
         new_subject = "Subject: %s" % result['headers'].get('Subject')
         self.assertEqual(org_subject, new_subject)
@@ -161,6 +165,43 @@ class TestSpamCTCP(unittest2.TestCase):
             result = self.spamc_tcp.learn(handle, 'forget')
         self.assertIn('message', result)
         self.assertEqual('EX_OK', result['message'])
+
+class TestSpamCTCPNoTell(unittest2.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        gzip = False
+        cls.using_sa = True
+        if os.environ.get('SPAMD_HOST', None) is None:
+            cls.tcp_server = return_tcp(10080, allow_tell=False)
+            t1 = threading.Thread(target=cls.tcp_server.serve_forever)
+            t1.setDaemon(True)
+            t1.start()
+            cls.using_sa = False
+        if os.environ.get('SPAMD_COMPRESS', None) and \
+                os.environ.get('CI', False) is False:
+            gzip = True
+        cls.spamc_tcp = SpamC(
+            host=os.environ.get('SPAMD_HOST', '127.0.0.1'),
+#            port=int(os.environ.get('SPAMD_PORT', 10080)),
+            port=10080,
+            gzip=gzip,
+            compress_level=int(os.environ.get('SPAMD_COMPRESS_LEVEL', 6)))
+        path = os.path.dirname(os.path.dirname(__file__))
+        cls.filename = os.path.join(path, 'examples', 'sample-spam.txt')
+
+    @classmethod
+    def tearDownClass(cls):
+        if hasattr(cls, 'tcp_server'):
+            cls.tcp_server.shutdown()
+
+    def test_spamc_tcp_learn(self):
+        with open(self.filename) as handle:
+            result = self.spamc_tcp.learn(handle, 'spam')
+        self.assertIn('message', result)
+        self.assertIn('code', result)
+        self.assertIn('Service Unavailable:', result['message'])
+        self.assertEquals(69, result['code'])
 
 if __name__ == '__main__':
     unittest2.main()

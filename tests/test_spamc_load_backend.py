@@ -12,7 +12,7 @@ from spamc import SpamC
 from spamc import backend_eventlet
 from spamc.exceptions import SpamCError
 
-from _s import return_tcp
+from ._s import return_tcp
 
 
 class TestSpamCTCP(unittest2.TestCase):

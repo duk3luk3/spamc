@@ -5,8 +5,8 @@ import threading
 
 import gevent
 
-from mimetools import Message
-from cStringIO import StringIO
+from email.message import Message
+from io import StringIO
 
 from gevent.pool import Pool
 from gevent.server import StreamServer

@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import os
 import sys
 import threading
@@ -8,13 +10,18 @@ except ImportError:
         raise
     import unittest as unittest2
 
-from mimetools import Message
-from cStringIO import StringIO
+
+if sys.version_info < (3, 0):
+    from cStringIO import StringIO
+    from email.parser import Parser
+else:
+    from email.parser import Parser
+    from io import StringIO
 
 from spamc import SpamC
 from spamc.exceptions import SpamCError
 
-from _s import return_tcp
+from ._s import return_tcp
 
 
 class TestSpamCTCP(unittest2.TestCase):
@@ -101,8 +108,8 @@ class TestSpamCTCP(unittest2.TestCase):
         result = self.spamc_tcp.process(handle)
         self.assertIn('message', result)
         with open(self.filename) as headerhandle:
-            headers1 = Message(headerhandle)
-        headers2 = Message(StringIO(result['message']))
+            headers1 = Parser().parse(headerhandle)
+        headers2 = Parser().parse(StringIO(result['message']))
         self.assertEqual(
             headers1.get('Subject'),
             headers2.get('Subject')
@@ -115,7 +122,8 @@ class TestSpamCTCP(unittest2.TestCase):
         result = self.spamc_tcp.headers(handle)
         self.assertIn('message', result)
         with open(self.filename) as headerhandle:
-            headers = Message(headerhandle)
+            headers = Parser().parse(headerhandle)
+            print('file_headers: ', headers)
         org_subject = "Subject: %s" % headers.get('Subject')
         new_subject = "Subject: %s" % result['headers'].get('Subject')
         self.assertEqual(org_subject, new_subject)

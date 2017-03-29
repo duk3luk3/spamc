@@ -21,18 +21,28 @@ spamc: Python spamassassin spamc client library
 Copyright 2015, Andrew Colin Kissa
 Licensed under AGPLv3+
 """
+from __future__ import print_function
+
 import os
 import socket
+import sys
 
-from mimetools import Message
-from cStringIO import StringIO
-from SocketServer import StreamRequestHandler, ThreadingTCPServer, \
-    ThreadingUnixStreamServer
+if sys.version_info < (3, 0):
+    from email.parser import FeedParser
+    from SocketServer import StreamRequestHandler, ThreadingTCPServer, \
+        ThreadingUnixStreamServer
+    from cStringIO import StringIO
+else:
+    from email.parser import BytesFeedParser as FeedParser
+    from socketserver import StreamRequestHandler, ThreadingTCPServer, \
+        ThreadingUnixStreamServer
+    from io import BytesIO as StringIO
 
+from email.message import Message
 
 ThreadingTCPServer.allow_reuse_address = True
 
-REPORT_TMPL = """Spam detection software, running on the system "localhost",
+REPORT_TMPL = b"""Spam detection software, running on the system "localhost",
 has identified this incoming email as possible spam.  The original
 message has been attached to this so you can view it or label
 similar future email.  If you have any questions, see
@@ -55,52 +65,78 @@ Content analysis details:   (15.0 points, 5.0 required)
  0.50 KAM_LAZY_DOMAIN_SECURITY   Sender doesn't have anti-forgery methods
 """
 
+def parse_headers(fp, MessageClass):
+    parser = FeedParser(_factory=MessageClass)
+    while True:
+        line = fp.readline()
+        if line == b'\r\n' or line == b'\n' or line == b'':
+            headers = parser.close()
+            return headers
+        else:
+            parser.feed(line)
 
 class TestSpamdHandler(StreamRequestHandler):
+    """
+    A spamd mockup
+
+    Implements the spamd protocol: http://svn.apache.org/repos/asf/spamassassin/trunk/spamd/PROTOCOL
+    and returns valid dummy responses
+    """
 
     MessageClass = Message
     default_request_version = "SPAMD/1.0"
+    allow_tell = True
 
     def do_PING(self):
         """Emulate PING"""
-        self.wfile.write("SPAMD/1.5 0 PONG\r\n")
+        self.wfile.write(b"SPAMD/1.5 0 PONG\r\n")
 
     def do_TELL(self):
         """Emulate TELL"""
-        self.wfile.write("SPAMD/1.5 0 EX_OK\r\n")
-        didset = self.headers.get('Set')
-        if didset:
-            self.wfile.write("DidSet: True\r\n")
-        didremove = self.headers.get('Remove')
-        if didremove:
-            self.wfile.write("DidRemove: True\r\n")
-        self.wfile.write("\r\n\r\n")
+        if self.allow_tell:
+            self.wfile.write(b"SPAMD/1.5 0 EX_OK\r\n")
+            didset = self.headers.get('Set')
+            if didset:
+                self.wfile.write(b"DidSet: True\r\n")
+            didremove = self.headers.get('Remove')
+            if didremove:
+                self.wfile.write(b"DidRemove: True\r\n")
+        else:
+            self.wfile.write(b"SPAMD/1.0 69 Service Unavailable: TELL commands are not enabled, set the --allow-tell switch.\r\n")
+        self.wfile.write(b"\r\n\r\n")
         self.close_connection = 1
 
     def do_HEADERS(self):
         """Emulate HEADERS"""
         content_length = int(self.headers.get('Content-length', 0))
         body = self.rfile.read(content_length)
-        parts, = body.split('\r\n\r\n')
-        _headers = self.MessageClass(StringIO(parts))
-        self.wfile.write("SPAMD/1.5 0 EX_OK\r\n")
-        self.wfile.write("Spam: True ; 15 / 5\r\n")
+        # Remove trailing \r\n\r\n
+        parts, = body.rsplit(b'\r\n\r\n', 1)
+        _headers = parse_headers(StringIO(parts), self.MessageClass)
+        if hasattr(_headers, 'as_bytes'):
+            response = _headers.as_bytes()
+        else:
+            response = _headers.as_string()
+        print('response', repr(response))
+
+        self.wfile.write(b"SPAMD/1.5 0 EX_OK\r\n")
+        self.wfile.write(b"Spam: True ; 15 / 5\r\n")
         if self.request_version >= (1, 3):
-            self.wfile.write("Content-length: %d\r\n" % len(_headers))
-        self.wfile.write("\r\n\r\n")
-        self.wfile.write(_headers)
+            self.wfile.write(b"Content-length: %d\r\n" % len(response))
+        self.wfile.write(b"\r\n")
+        self.wfile.write(response)
         self.close_connection = 1
 
     def do_PROCESS(self):
         """Emulate PROCESS"""
         content_length = int(self.headers.get('Content-length', 0))
         body = self.rfile.read(content_length)
-        self.wfile.write("SPAMD/1.5 0 EX_OK\r\n")
-        self.wfile.write("Spam: True ; 15 / 5\r\n")
+        self.wfile.write(b"SPAMD/1.5 0 EX_OK\r\n")
+        self.wfile.write(b"Spam: True ; 15 / 5\r\n")
         if self.request_version >= (1, 3):
             self.wfile.write(
-                "Content-length: %d\r\n" % content_length)
-        self.wfile.write("\r\n\r\n")
+                b"Content-length: %d\r\n" % content_length)
+        self.wfile.write(b"\r\n\r\n")
         self.wfile.write(body)
         self.close_connection = 1
 
@@ -110,38 +146,38 @@ class TestSpamdHandler(StreamRequestHandler):
 
     def do_REPORT(self):
         """Emulate REPORT"""
-        self.wfile.write("SPAMD/1.5 0 EX_OK\r\n")
-        self.wfile.write("Spam: True ; 15 / 5\r\n")
+        self.wfile.write(b"SPAMD/1.5 0 EX_OK\r\n")
+        self.wfile.write(b"Spam: True ; 15 / 5\r\n")
         if self.request_version >= (1, 3):
             self.wfile.write(
-                "Content-length: %d\r\n" % len(REPORT_TMPL))
-        self.wfile.write("\r\n\r\n")
+                b"Content-length: %d\r\n" % len(REPORT_TMPL))
+        self.wfile.write(b"\r\n\r\n")
         self.wfile.write(REPORT_TMPL)
         self.close_connection = 1
 
     def do_SYMBOLS(self):
         """Emulate SYMBOLS"""
-        rules = "BAYES_00,RDNS_NONE,KAM_LAZY_DOMAIN_SECURITY"
-        self.wfile.write("SPAMD/1.5 0 EX_OK\r\n")
-        self.wfile.write("Spam: True ; 15 / 5\r\n")
+        rules = b"BAYES_00,RDNS_NONE,KAM_LAZY_DOMAIN_SECURITY"
+        self.wfile.write(b"SPAMD/1.5 0 EX_OK\r\n")
+        self.wfile.write(b"Spam: True ; 15 / 5\r\n")
         if self.request_version >= (1, 3):
-            self.wfile.write("Content-length: %d\r\n" % len(rules))
-        self.wfile.write("\r\n\r\n")
+            self.wfile.write(b"Content-length: %d\r\n" % len(rules))
+        self.wfile.write(b"\r\n\r\n")
         self.wfile.write(rules)
         if self.request_version < (1, 3):
-            self.wfile.write("\r\n")
+            self.wfile.write(b"\r\n")
         self.close_connection = 1
 
     def do_CHECK(self):
         """Emulate CHECK"""
-        self.wfile.write("SPAMD/1.5 0 EX_OK\r\n")
-        self.wfile.write("Spam: True ; 15 / 5\r\n")
-        self.wfile.write("\r\n\r\n")
+        self.wfile.write(b"SPAMD/1.5 0 EX_OK\r\n")
+        self.wfile.write(b"Spam: True ; 15 / 5\r\n")
+        self.wfile.write(b"\r\n\r\n")
         self.close_connection = 1
 
     def send_error(self, msg):
         """Send Error response"""
-        self.wfile.write("SPAMD/1.0 EX_PROTOCOL Bad header line: %s\r\n" % msg)
+        self.wfile.write(b"SPAMD/1.0 EX_PROTOCOL Bad header line: %s\r\n" % msg)
 
     def parse_request(self):
         """Parse the request"""
@@ -149,47 +185,49 @@ class TestSpamdHandler(StreamRequestHandler):
         self.request_version = version = self.default_request_version
         self.close_connection = 1
         requestline = self.raw_requestline
-        requestline = requestline.rstrip('\r\n')
+        requestline = requestline.rstrip(b'\r\n')
         self.requestline = requestline
         words = requestline.split()
 
         if len(words) == 2:
             command, version = words
-            if version[:6] != 'SPAMC/':
-                self.send_error("Bad request version (%r)" % version)
+            if version[:6] != b'SPAMC/':
+                self.send_error(b"Bad request version (%r)" % version)
                 return False
             try:
-                base_version_number = version.split('/', 1)[1]
-                version_number = base_version_number.split(".")
+                base_version_number = version.split(b'/', 1)[1]
+                version_number = base_version_number.split(b".")
                 if len(version_number) != 2:
                     raise ValueError
 
                 version_number = int(version_number[0]), int(version_number[1])
             except (ValueError, IndexError):
-                self.send_error("Bad request version (%r)" % version)
+                self.send_error(b"Bad request version (%r)" % version)
                 return False
             if version_number >= (1, 6):
                 self.send_error(
-                    "Invalid HTTP Version (%s)" % base_version_number)
+                    b"Invalid HTTP Version (%s)" % base_version_number)
                 return False
         elif not words:
             return False
         else:
-            self.send_error("Bad request syntax (%r)" % requestline)
+            self.send_error(b"Bad request syntax (%r)" % requestline)
             return False
-        self.command, self.request_version = command, version
-        self.headers = self.MessageClass(self.rfile, 0)
+        self.command, self.request_version = command, version_number
+        # Read headers
+        self.headers = parse_headers(self.rfile, self.MessageClass)
         return True
 
     def handle_one_request(self):
         """Handle a request"""
         try:
             self.raw_requestline = self.rfile.readline(65537)
+            print('requestline', repr(self.raw_requestline))
             if len(self.raw_requestline) > 65536:
                 self.requestline = ''
                 self.request_version = ''
                 self.command = ''
-                self.send_error("Invalid request")
+                self.send_error(b"Invalid request")
                 return
 
             if not self.raw_requestline:
@@ -199,9 +237,9 @@ class TestSpamdHandler(StreamRequestHandler):
             if not self.parse_request():
                 return
 
-            mname = 'do_' + self.command
+            mname = 'do_' + self.command.decode()
             if not hasattr(self, mname):
-                self.send_error("Unsupported method (%r)" % self.command)
+                self.send_error(b"Unsupported method (%r)" % self.command)
                 return
 
             method = getattr(self, mname)
@@ -219,11 +257,17 @@ class TestSpamdHandler(StreamRequestHandler):
         while not self.close_connection:
             self.handle_one_request()
 
+class TestNoLearningSpamdHandler(TestSpamdHandler):
+    allow_tell = False
 
-def return_tcp(port=10000):
+def return_tcp(port=10000, allow_tell=True):
     """Return a tcp SPAMD server"""
     address = ('127.0.0.1', port)
-    server = ThreadingTCPServer(address, TestSpamdHandler)
+    if allow_tell:
+        server = ThreadingTCPServer(address, TestSpamdHandler)
+    else:
+        server = ThreadingTCPServer(address, TestNoLearningSpamdHandler)
+
     return server
 
 
