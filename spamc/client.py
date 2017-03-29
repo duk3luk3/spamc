@@ -39,7 +39,7 @@ PROTOCOL_VERSION = 'SPAMC/1.5'
 
 def _check_action(action):
     """check for invalid actions"""
-    if isinstance(action, types.StringTypes):
+    if isinstance(action, str):
         action = action.lower()
 
     if action not in ['learn', 'forget', 'report', 'revoke']:
@@ -50,7 +50,7 @@ def _check_action(action):
 # pylint: disable=R0912,R0915
 def get_response(cmd, conn):
     """Return a response"""
-    resp = conn.socket().makefile('rb', -1)
+    resp = conn.socket().makefile('rb', None)
     resp_dict = dict(
         code=0,
         message='',
@@ -66,7 +66,15 @@ def get_response(cmd, conn):
         resp_dict['didset'] = False
         resp_dict['didremove'] = False
 
-    data = resp.read()
+    raw = resp.read()
+    try:
+        if hasattr(raw, 'decode'):
+            data = raw.decode()
+        else:
+            data = raw
+    except:
+        print(repr(raw))
+        raise
     lines = data.split('\r\n')
     for index, line in enumerate(lines):
         if index == 0:
@@ -191,11 +199,20 @@ class SpamC(object):
             conn = None
             try:
                 conn = self.get_connection()
-                if hasattr(msg, 'read') and hasattr(msg, 'fileno'):
-                    msg_length = str(os.fstat(msg.fileno()).st_size)
-                elif hasattr(msg, 'read'):
-                    msg.seek(0, 2)
-                    msg_length = str(msg.tell() + 2)
+                if hasattr(msg, 'read'):
+                    # IOBase now implements fileno() as stub method on everything
+                    # This means fileno() may be present, but do nothing other than
+                    # blow up.
+                    statted = False
+                    if hasattr(msg, 'fileno'):
+                        try:
+                            msg_length = str(os.fstat(msg.fileno()).st_size)
+                            statted = True
+                        except OSError:
+                            pass
+                    if not statted:
+                        msg.seek(0, 2)
+                        msg_length = str(msg.tell() + 2)
                 else:
                     if msg:
                         try:
@@ -209,7 +226,7 @@ class SpamC(object):
 
                 headers = self.get_headers(cmd, msg_length, extra_headers)
 
-                if isinstance(msg, types.StringTypes):
+                if isinstance(msg, str):
                     if self.gzip and msg:
                         msg = compress(msg + '\r\n', self.compress_level)
                     else:
@@ -240,7 +257,7 @@ class SpamC(object):
                     conn.close()
                 errors = (errno.EAGAIN, errno.EPIPE, errno.EBADF,
                           errno.ECONNRESET)
-                if err[0] not in errors or tries >= self.max_tries:
+                if err.errno not in errors or tries >= self.max_tries:
                     raise SpamCError("socket.error: %s" % str(err))
             except BaseException:
                 if conn is not None:
@@ -313,7 +330,7 @@ class SpamC(object):
 
     def learn(self, msg, learnas):
         """Learn message as spam/ham or forget"""
-        if not isinstance(learnas, types.StringTypes):
+        if not isinstance(learnas, str):
             raise SpamCError('The learnas option is invalid')
         if learnas.lower() == 'forget':
             resp = self.tell(msg, 'forget')
