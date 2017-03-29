@@ -30,9 +30,12 @@ from setuptools import setup, find_packages
 TESTS_REQUIRE = ['nose', 'coverage', 'mock', 'eventlet', 'gevent']
 INSTALL_REQUIRES = []
 
+
 if sys.version_info < (2, 7):
     TESTS_REQUIRE.extend(['unittest2', 'importlib'])
     INSTALL_REQUIRES.append('importlib')
+if sys.version_info < (3, 0):
+    INSTALL_REQUIRES.append('future')
 
 
 def get_readme():
