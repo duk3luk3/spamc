@@ -23,6 +23,7 @@ import os
 import errno
 import types
 import socket
+import sys
 
 from zlib import compress
 # from mimetools import Message
@@ -68,7 +69,7 @@ def get_response(cmd, conn):
 
     raw = resp.read()
     try:
-        if hasattr(raw, 'decode'):
+        if sys.version_info >= (3,0):
             data = raw.decode()
         else:
             data = raw
@@ -117,7 +118,13 @@ def get_response(cmd, conn):
         resp_dict['message'] = ''.join(lines[4:]) + '\r\n'
     if cmd == 'HEADERS':
         parser = Parser()
-        headers = parser.parsestr('\r\n'.join(lines[4:]), headersonly=True)
+        print('get_response HEADERS response lines:', lines)
+        headerstr = '\r\n'.join(lines[4:])
+        if sys.version_info < (2, 7):
+            # Python 2.6 email parser needs plain string, not unicode
+            headerstr = str(headerstr)
+        print('get_response HEADERS headerstr:', headerstr)
+        headers = parser.parsestr(headerstr, headersonly=True)
         for key in headers.keys():
             resp_dict['headers'][key] = headers[key]
     return resp_dict

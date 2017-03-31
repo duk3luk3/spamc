@@ -120,6 +120,7 @@ class TestSpamCTCP(unittest2.TestCase):
             data = _handle.read()
         handle = StringIO(data)
         result = self.spamc_tcp.headers(handle)
+        print('response_headers:', result)
         self.assertIn('message', result)
         with open(self.filename) as headerhandle:
             headers = Parser().parse(headerhandle)
