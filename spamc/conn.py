@@ -21,6 +21,7 @@ connections
 """
 import ssl
 import socket
+import sys
 
 from zlib import compressobj
 
@@ -72,6 +73,8 @@ class Connector(object):
 
     def send(self, data):
         "send data"
+        if sys.version_info >= (3,0):
+            data = data.encode()
         return self._s.sendall(data)
 
     # def recv(self, size=1024):

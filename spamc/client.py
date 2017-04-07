@@ -69,7 +69,8 @@ def get_response(cmd, conn):
 
     raw = resp.read()
     try:
-        if sys.version_info >= (3,0):
+        # XXX Why can raw be '' (and not b''!) ???
+        if sys.version_info >= (3,0) and raw != '':
             data = raw.decode()
         else:
             data = raw
