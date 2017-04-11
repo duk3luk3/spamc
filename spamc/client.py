@@ -236,7 +236,10 @@ class SpamC(object):
 
                 if isinstance(msg, str):
                     if self.gzip and msg:
-                        msg = compress(msg + '\r\n', self.compress_level)
+                        if sys.version_info >= (3,0):
+                            msg = msg.encode()
+                            headers = headers.encode()
+                        msg = compress(msg + b'\r\n', self.compress_level)
                     else:
                         msg = msg + '\r\n'
                     conn.send(headers + msg)

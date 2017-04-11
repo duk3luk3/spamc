@@ -73,7 +73,7 @@ class Connector(object):
 
     def send(self, data):
         "send data"
-        if sys.version_info >= (3,0):
+        if sys.version_info >= (3,0) and isinstance(data, str):
             data = data.encode()
         return self._s.sendall(data)
 
@@ -94,7 +94,9 @@ class Connector(object):
 
         while 1:
             binarydata = data.read(chunk_size)
-            if binarydata == '':
+            if sys.version_info >= (3,0):
+                binarydata = binarydata.encode()
+            if binarydata == b'':
                 break
             if zlib_compress:
                 binarydata = compressor.compress(binarydata)
